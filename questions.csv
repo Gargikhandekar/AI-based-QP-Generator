@@ -1,0 +1,41 @@
+question,subject,topic,marks,difficulty
+Define Software Engineering.,Software Engineering,Basics,2,Easy
+What are the characteristics of good software?,Software Engineering,Basics,4,Easy
+Explain the Waterfall Model with diagram.,Software Engineering,SDLC,10,Medium
+Differentiate between Agile and Waterfall.,Software Engineering,SDLC,5,Medium
+List phases of the Software Development Life Cycle.,Software Engineering,SDLC,3,Easy
+What is prototyping? Explain advantages.,Software Engineering,SDLC,5,Medium
+Explain Spiral Model.,Software Engineering,SDLC,8,Medium
+What is Software Requirement Specification (SRS)?,Software Engineering,Requirements,4,Easy
+Write functional vs non-functional requirements.,Software Engineering,Requirements,6,Medium
+Explain Black-box vs White-box testing.,Software Engineering,Testing,5,Medium
+What is unit testing? Give example.,Software Engineering,Testing,3,Easy
+What is regression testing?,Software Engineering,Testing,4,Medium
+What is software maintenance? Types?,Software Engineering,Maintenance,6,Medium
+Differentiate verification and validation.,Software Engineering,Testing,4,Easy
+Explain Coupling and Cohesion.,Software Engineering,Design,6,Medium
+Discuss CASE tools with examples.,Software Engineering,Tools,8,Hard
+What is Management?,Essentials of Management,Introduction,2,Easy
+Explain functions of management.,Essentials of Management,Introduction,6,Medium
+Discuss Taylor’s Scientific Management Theory.,Essentials of Management,Theories,8,Medium
+Explain Fayol’s Principles of Management.,Essentials of Management,Theories,10,Medium
+Explain Maslow's Hierarchy of Needs.,Essentials of Management,Motivation,5,Medium
+Differentiate Theory X and Theory Y.,Essentials of Management,Motivation,4,Easy
+What is Decision Making? Explain steps.,Essentials of Management,Decision Making,6,Medium
+What is Planning? Explain its importance.,Essentials of Management,Planning,5,Easy
+What is Organization Structure? Types?,Essentials of Management,Organization,8,Medium
+Differentiate centralization vs decentralization.,Essentials of Management,Organization,6,Medium
+What is leadership? Styles of leadership?,Essentials of Management,Leadership,8,Medium
+What is Controlling? Explain process.,Essentials of Management,Controlling,6,Medium
+Explain Data Architecture.,Data Architecture,Introduction,4,Easy
+What is Data Warehousing?,Data Architecture,Warehousing,5,Easy
+Explain ETL process with example.,Data Architecture,Warehousing,8,Medium
+Differentiate OLTP and OLAP.,Data Architecture,Databases,4,Easy
+What is OLAP? Explain types.,Data Architecture,Databases,6,Medium
+Explain Data Lake with example.,Data Architecture,Storage,8,Medium
+What is Data Mining? Applications?,Data Architecture,Mining,8,Medium
+Differentiate classification and clustering.,Data Architecture,Mining,6,Medium
+Explain dimensional modeling.,Data Architecture,Modeling,10,Hard
+What are Star and Snowflake schemas?,Data Architecture,Modeling,6,Medium
+What is Big Data? Explain its characteristics.,Data Architecture,Big Data,6,Medium
+Discuss Hadoop architecture.,Data Architecture,Big Data,10,Hard

@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Generated Questions</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+    <div class="container">
+        <h1>Generated Questions</h1>
+
+        {% if questions %}
+            <ol>
+                {% for question, topic, marks in questions %}
+                    <li>
+                        <strong>Question:</strong> {{ question }}<br />
+                        <strong>Topic:</strong> {{ topic }}<br />
+                        <strong>Marks:</strong> {{ marks }}
+                    </li>
+                {% endfor %}
+            </ol>
+        {% else %}
+            <p>No questions generated.</p>
+        {% endif %}
+
+        <a href="/">Generate More Questions</a>
+    </div>
+</body>
+</html>
