@@ -10,21 +10,98 @@
         <h1>Generated Questions</h1>
 
         {% if questions %}
-            <ol>
+            <div class="export-buttons">
+                <button onclick="exportToPDF()" class="export-btn pdf-btn">Export as PDF</button>
+                <button onclick="exportToDOCX()" class="export-btn docx-btn">Export as DOCX</button>
+            </div>
+            
+            <ol id="questions-list">
                 {% for question, topic, marks in questions %}
-                    <li>
-                        <strong>Question:</strong> {{ question }}<br />
+                    <li class="question-item">
+                        <strong>Question:</strong> 
+                        {% if '\nA) ' in question %}
+                            <div class="mcq-question">
+                                {% set lines = question.split('\n') %}
+                                <div class="question-text">{{ lines[0] }}</div>
+                                {% for line in lines[1:] %}
+                                    {% if line.startswith('A) ') or line.startswith('B) ') or line.startswith('C) ') or line.startswith('D) ') %}
+                                        <div class="mcq-option">{{ line }}</div>
+                                    {% elif line.startswith('Correct Answer:') %}
+                                        <div class="correct-answer"><strong>{{ line }}</strong></div>
+                                    {% endif %}
+                                {% endfor %}
+                            </div>
+                        {% else %}
+                            {{ question }}
+                        {% endif %}
+                        <br />
                         <strong>Topic:</strong> {{ topic }}<br />
                         <strong>Marks:</strong> {{ marks }}
                     </li>
                 {% endfor %}
             </ol>
             <p><em>Total questions: {{ questions|length }}</em></p>
+            {% if questions and questions[0][2] %}
+                {% set total_marks = questions|map(attribute=2)|map('int')|sum %}
+                <p><em>Total marks: {{ total_marks }}</em></p>
+            {% endif %}
         {% else %}
             <p>No questions generated.</p>
         {% endif %}
 
         <a href="/">Generate More Questions</a>
+
+        <script>
+            function exportToPDF() {
+                const questions = {{ questions|tojson }};
+                const subject = "{{ questions[0][1] if questions else 'Question Paper' }}";
+                
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/export_pdf';
+                
+                const questionsInput = document.createElement('input');
+                questionsInput.type = 'hidden';
+                questionsInput.name = 'questions_data';
+                questionsInput.value = JSON.stringify(questions);
+                form.appendChild(questionsInput);
+                
+                const subjectInput = document.createElement('input');
+                subjectInput.type = 'hidden';
+                subjectInput.name = 'subject';
+                subjectInput.value = subject;
+                form.appendChild(subjectInput);
+                
+                document.body.appendChild(form);
+                form.submit();
+                document.body.removeChild(form);
+            }
+            
+            function exportToDOCX() {
+                const questions = {{ questions|tojson }};
+                const subject = "{{ questions[0][1] if questions else 'Question Paper' }}";
+                
+                const form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/export_docx';
+                
+                const questionsInput = document.createElement('input');
+                questionsInput.type = 'hidden';
+                questionsInput.name = 'questions_data';
+                questionsInput.value = JSON.stringify(questions);
+                form.appendChild(questionsInput);
+                
+                const subjectInput = document.createElement('input');
+                subjectInput.type = 'hidden';
+                subjectInput.name = 'subject';
+                subjectInput.value = subject;
+                form.appendChild(subjectInput);
+                
+                document.body.appendChild(form);
+                form.submit();
+                document.body.removeChild(form);
+            }
+        </script>
     </div>
 </body>
 </html>

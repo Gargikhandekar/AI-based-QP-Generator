@@ -27,7 +27,15 @@
         <label for="num_questions">Number of questions:</label>
         <input type="number" id="num_questions" name="num_questions" min="1" max="20" value="5">
 
-        <!-- Marks allocation removed in AI-only mode -->
+        <label for="total_marks">Total marks (optional):</label>
+        <input type="number" id="total_marks" name="total_marks" min="0" max="200" placeholder="e.g., 50" title="Leave empty for auto-allocation">
+
+        <label for="question_type">Question type:</label>
+        <select id="question_type" name="question_type">
+            <option value="short_answer">Short Answer Questions</option>
+            <option value="mcq">Multiple Choice Questions (MCQ)</option>
+            <option value="mixed">Mixed (Both types)</option>
+        </select>
 
         <button type="submit">Generate Questions</button>
 

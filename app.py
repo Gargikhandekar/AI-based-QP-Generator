@@ -1,6 +1,18 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, send_file, make_response
 import nltk
 from generator import allocate_questions
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from docx import Document
+from docx.shared import Inches
+import io
+import tempfile
+import os
+import openai
+from dotenv import load_dotenv
+import json
 
 # Try to import Questgen; if unavailable, we'll use a local fallback
 qg = None
@@ -20,80 +32,440 @@ except Exception:
 
 nltk.download('punkt')
 
-def generate_fallback_questions(input_text: str, desired_count: int, subject_hint: str = "") -> list:
+# Enhanced options templates with realistic alternatives
+mcq_options_templates = {
+    "software engineering": {
+        "performance": ["Improved system speed", "Reduced memory usage", "Better user experience", "Enhanced security"],
+        "scalability": ["Handling increased load", "Reducing complexity", "Improving reliability", "Enhancing maintainability"],
+        "maintainability": ["Easier code updates", "Better performance", "Reduced costs", "Improved security"],
+        "reliability": ["System stability", "Better performance", "Easier testing", "Reduced complexity"]
+    },
+    "data architecture": {
+        "performance": ["Faster data processing", "Reduced storage costs", "Better data quality", "Improved security"],
+        "scalability": ["Handling data growth", "Reducing complexity", "Improving reliability", "Enhancing flexibility"],
+        "governance": ["Data quality control", "Performance optimization", "Cost reduction", "User experience"],
+        "integration": ["System connectivity", "Data consistency", "Performance improvement", "Security enhancement"]
+    },
+    "data structures": {
+        "time_complexity": ["O(1) constant time", "O(log n) logarithmic", "O(n) linear time", "O(n²) quadratic"],
+        "space_complexity": ["O(1) constant space", "O(n) linear space", "O(log n) logarithmic", "O(n²) quadratic"],
+        "access_pattern": ["Random access", "Sequential access", "Indexed access", "Hash-based access"],
+        "use_case": ["Search operations", "Sorting algorithms", "Memory management", "Network protocols"]
+    },
+    "database": {
+        "performance": ["Query optimization", "Data compression", "Index management", "Connection pooling"],
+        "consistency": ["ACID properties", "Data integrity", "Transaction management", "Concurrency control"],
+        "scalability": ["Horizontal scaling", "Vertical scaling", "Load balancing", "Data partitioning"],
+        "security": ["Access control", "Data encryption", "Audit logging", "Backup strategies"]
+    }
+}
+
+# Load environment variables for API keys
+load_dotenv()
+
+# Initialize OpenAI client
+openai_client = None
+try:
+    openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+except Exception as e:
+    print(f"OpenAI client initialization failed: {e}")
+    openai_client = None
+
+def generate_fallback_questions(input_text: str, desired_count: int, subject_hint: str = "", question_type: str = "short_answer") -> list:
     import re
+    import random
     
-    # Extract the core subject from input
+    # Normalize inputs
     text = (input_text or subject_hint or "").strip()
-    # Clean up the text
-    normalized = re.sub(r"\b\d+\b", " ", text, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bquestions?\b", " ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\bof\b", " ", normalized, flags=re.IGNORECASE)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    
-    # Map to specific Software Engineering topics
-    se_topics = {
+    normalized = re.sub(r"\s+", " ", text)
+    subject_key = normalized.lower()
+
+    # Subtopic pools by subject
+    subject_to_subtopics = {
         "software engineering": [
-            "Explain the Software Development Life Cycle (SDLC) phases with their key deliverables.",
-            "Compare Waterfall, Agile, and Spiral models. When would you use each?",
-            "What are functional vs non-functional requirements? Give examples of each.",
-            "Explain Use Case diagrams and Sequence diagrams with a login example.",
-            "Define software testing levels: unit, integration, system, and acceptance testing.",
-            "What is the difference between verification and validation in software testing?",
-            "Explain the concepts of coupling and cohesion in software design.",
-            "Describe the SOLID principles with brief examples.",
-            "What are design patterns? Explain Factory and Observer patterns.",
-            "Compare Black-box, White-box, and Gray-box testing techniques.",
-            "Explain Continuous Integration and Continuous Deployment (CI/CD).",
-            "What are the key challenges in software project management?",
-            "Describe software maintenance types and their characteristics.",
-            "Explain software metrics and their importance in quality assurance.",
-            "What is software configuration management? Why is it important?"
+            "SDLC phases", "requirements (functional vs non-functional)", "UML (use case, sequence)",
+            "testing levels", "verification vs validation", "coupling vs cohesion",
+            "SOLID principles", "design patterns", "CI/CD", "project management", "metrics", "configuration management"
         ],
         "data structures": [
-            "Compare time complexity of different sorting algorithms (Bubble, Quick, Merge).",
-            "Explain the difference between arrays and linked lists with their trade-offs.",
-            "Describe stack and queue data structures with real-world applications.",
-            "What is a binary tree? Explain different tree traversal methods.",
-            "Compare hash tables with other data structures for search operations.",
-            "Explain the concept of Big O notation with examples.",
-            "Describe dynamic programming with a classic example.",
-            "What are graphs? Explain BFS and DFS algorithms.",
-            "Compare different tree structures: BST, AVL, and Red-Black trees.",
-            "Explain the heap data structure and its applications."
+            "array vs linked list", "stack and queue", "binary trees and traversals",
+            "hash tables", "Big O notation", "dynamic programming", "graphs (BFS/DFS)",
+            "balanced trees (AVL/RB)", "heaps"
         ],
         "database": [
-            "Explain ACID properties in database transactions.",
-            "Compare SQL and NoSQL databases with their use cases.",
-            "What is database normalization? Explain 1NF, 2NF, and 3NF.",
-            "Describe different types of database relationships with examples.",
-            "Explain database indexing and its impact on query performance.",
-            "What are database triggers and stored procedures?",
-            "Compare different database models: relational, hierarchical, and network.",
-            "Explain database backup and recovery strategies.",
-            "What is database concurrency control? Explain locking mechanisms.",
-            "Describe database security measures and access control."
+            "ACID properties", "SQL vs NoSQL", "normalization (1NF/2NF/3NF)", "relationships",
+            "indexing", "triggers and stored procedures", "database models", "backup and recovery",
+            "concurrency control", "security and access control"
+        ],
+        "data architecture": [
+            "enterprise data strategy", "conceptual/logical/physical models", "data lake vs warehouse vs lakehouse",
+            "batch vs streaming pipelines", "data mesh", "data governance (ownership, lineage, catalog)",
+            "analytical schema (star vs snowflake)", "data quality dimensions", "medallion architecture",
+            "CDC patterns"
         ]
     }
+
+    # Difficulty tuning tokens
+    difficulty = "medium"
+    # Try to detect difficulty from text if provided
+    if re.search(r"\b(easy|beginner)\b", subject_key):
+        difficulty = "easy"
+    elif re.search(r"\b(advanced|hard|difficult)\b", subject_key):
+        difficulty = "hard"
+
+    # Pick subject by fuzzy match of keys
+    def pick_subject(key: str) -> str:
+        if not key:
+            return "software engineering"
+        for s in subject_to_subtopics.keys():
+            if s in key:
+                return s
+        # fallback simple heuristics
+        if any(w in key for w in ["db", "sql", "database"]):
+            return "database"
+        if any(w in key for w in ["data architecture", "lakehouse", "warehouse", "pipeline", "governance", "mesh"]):
+            return "data architecture"
+        if any(w in key for w in ["stack", "queue", "tree", "graph", "algorithm"]):
+            return "data structures"
+        return "software engineering"
+
+    chosen_subject = pick_subject(subject_key)
+    subtopics = subject_to_subtopics.get(chosen_subject, subject_to_subtopics["software engineering"])[:]
+
+    # Question templates with placeholders
+    templates_easy = [
+        "Define {topic} in the context of {subject}.",
+        "List key characteristics of {topic}.",
+        "Give a simple example that illustrates {topic}.",
+        "Why is {topic} important in {subject}?"
+    ]
+    templates_medium = [
+        "Compare and contrast {topic} with a closely related concept in {subject}.",
+        "Explain how {topic} impacts design decisions in {subject}.",
+        "Describe a real-world scenario where {topic} is applied.",
+        "Identify common pitfalls when working with {topic} and how to avoid them."
+    ]
+    templates_hard = [
+        "Evaluate trade-offs of alternative approaches to {topic} in {subject}.",
+        "Design a solution that incorporates {topic} and justify the choices.",
+        "Propose metrics to assess effectiveness of {topic} in practice.",
+        "Explain how {topic} scales and what bottlenecks may arise."
+    ]
     
-    # Find matching topic
-    core_subject = normalized.lower()
+    # Enhanced MCQ templates with subject-specific content
+    mcq_templates = {
+        "software engineering": [
+            "Which of the following is the most appropriate use case for the {topic} design pattern?",
+            "In the context of {subject}, what is the primary benefit of implementing {topic}?",
+            "Which statement best describes the relationship between {topic} and software quality?",
+            "When designing a system that uses {topic}, which consideration is most critical?",
+            "Which of the following is NOT a valid application of {topic} in {subject}?",
+            "What is the main challenge associated with implementing {topic} in large-scale systems?",
+            "In {subject}, {topic} is most commonly used to address which problem?",
+            "Which factor is most important when evaluating the effectiveness of {topic}?"
+        ],
+        "data architecture": [
+            "In a data architecture context, which approach best describes {topic}?",
+            "What is the primary advantage of using {topic} in enterprise data management?",
+            "Which of the following scenarios would most benefit from implementing {topic}?",
+            "In data architecture, {topic} is primarily used to solve which problem?",
+            "Which statement accurately describes the role of {topic} in data governance?",
+            "What is the main consideration when designing a system that incorporates {topic}?",
+            "Which of the following is NOT a characteristic of effective {topic} implementation?",
+            "In the context of data architecture, {topic} is most closely related to which concept?"
+        ],
+        "data structures": [
+            "Which of the following best describes the time complexity of {topic} operations?",
+            "In what scenario would you choose {topic} over alternative data structures?",
+            "Which statement accurately describes the space complexity of {topic}?",
+            "What is the primary advantage of using {topic} for this specific use case?",
+            "Which of the following is NOT a valid operation on {topic}?",
+            "When implementing {topic}, which consideration is most important for performance?",
+            "Which data structure would be most appropriate as an alternative to {topic}?",
+            "What is the main limitation of {topic} in certain applications?"
+        ],
+        "database": [
+            "In database design, which principle is most relevant to {topic}?",
+            "What is the primary purpose of {topic} in database management systems?",
+            "Which of the following scenarios would most benefit from {topic}?",
+            "In the context of database optimization, {topic} is used to address which issue?",
+            "Which statement best describes the impact of {topic} on query performance?",
+            "What is the main consideration when implementing {topic} in a distributed database?",
+            "Which of the following is NOT a valid application of {topic} in database systems?",
+            "In database architecture, {topic} is most closely related to which concept?"
+        ]
+    }
+
+    # Seed with any keywords from input_text as extra subtopics
+    extra_topics = []
+    if input_text:
+        # Extract candidate keywords (very lightweight heuristic)
+        words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-/]+", input_text) if len(w) > 3]
+        # sample unique tokens
+        extra_topics = list(dict.fromkeys(w.lower() for w in words))[:10]
+
+    pool = subtopics + extra_topics
+    if not pool:
+        pool = ["core concepts"]
+
+    # Build unique questions based on type
     questions = []
+    used = set()
+    attempts = 0
     
-    for topic, topic_questions in se_topics.items():
-        if topic in core_subject or any(word in core_subject for word in topic.split()):
-            questions = topic_questions[:desired_count]
+    while len(questions) < desired_count and attempts < desired_count * 10:
+        attempts += 1
+        topic = random.choice(pool)
+        
+        if question_type == "mcq":
+            # Generate MCQ using subject-specific templates
+            subject_templates = mcq_templates.get(chosen_subject, mcq_templates["software engineering"])
+            template = random.choice(subject_templates)
+            question_text = template.format(topic=topic, subject=chosen_subject)
+            
+            # Get realistic options based on subject and topic
+            options = generate_realistic_mcq_options(chosen_subject, topic, template)
+            
+            # Format MCQ
+            correct_answer = random.choice(['A', 'B', 'C', 'D'])
+            q = f"{question_text}\nA) {options[0]}\nB) {options[1]}\nC) {options[2]}\nD) {options[3]}\nCorrect Answer: {correct_answer}"
+            
+        elif question_type == "mixed":
+            # Randomly choose between short answer and MCQ
+            if random.choice([True, False]):
+                # Short answer
+                if difficulty == "easy":
+                    templates = templates_easy
+                elif difficulty == "hard":
+                    templates = templates_hard
+                else:
+                    templates = templates_medium
+                template = random.choice(templates)
+                q = template.format(topic=topic, subject=chosen_subject)
+            else:
+                # MCQ
+                subject_templates = mcq_templates.get(chosen_subject, mcq_templates["software engineering"])
+                template = random.choice(subject_templates)
+                question_text = template.format(topic=topic, subject=chosen_subject)
+                options = generate_realistic_mcq_options(chosen_subject, topic, template)
+                correct_answer = random.choice(['A', 'B', 'C', 'D'])
+                q = f"{question_text}\nA) {options[0]}\nB) {options[1]}\nC) {options[2]}\nD) {options[3]}\nCorrect Answer: {correct_answer}"
+        else:
+            # Short answer
+            if difficulty == "easy":
+                templates = templates_easy
+            elif difficulty == "hard":
+                templates = templates_hard
+            else:
+                templates = templates_medium
+            template = random.choice(templates)
+            q = template.format(topic=topic, subject=chosen_subject)
+        
+        if q.lower() in used:
+            continue
+        used.add(q.lower())
+        questions.append(q)
+
+    # If still short, backfill with generic prompts
+    while len(questions) < desired_count:
+        if question_type == "mcq":
+            questions.append(f"Which of the following best describes a key concept in {chosen_subject}?\nA) Option A\nB) Option B\nC) Option C\nD) Option D\nCorrect Answer: A")
+        else:
+            questions.append(f"Discuss a key concept in {chosen_subject} and its practical implications.")
+
+    # Return tuples: (question, subject, difficulty)
+    display_subject = normalized.title() if normalized else (subject_hint or chosen_subject.title())
+    return [(q, display_subject, difficulty) for q in questions[:desired_count]]
+
+def generate_ai_questions_openai(input_text: str, num_questions: int, subject: str = "", difficulty: str = "medium", total_marks: int = 0, question_type: str = "short_answer") -> list:
+    """Generate questions using OpenAI API"""
+    if not openai_client:
+        return []
+    
+    # Calculate marks per question if total marks specified
+    marks_info = ""
+    if total_marks > 0:
+        marks_per_question = total_marks // num_questions
+        remaining_marks = total_marks % num_questions
+        marks_info = f" (Total marks: {total_marks}, approximately {marks_per_question} marks per question)"
+    
+    # Determine question format with enhanced instructions
+    if question_type == "mcq":
+        format_instruction = "Format your response as a JSON array of objects, where each object has 'question' (string), 'options' (array of 4 strings), and 'correct_answer' (string)."
+        question_instruction = """Generate high-quality multiple choice questions with these requirements:
+- Each question should test specific knowledge or understanding
+- Provide 4 realistic options (A, B, C, D) where only one is clearly correct
+- Make incorrect options plausible but definitively wrong
+- Avoid obvious or trivial questions
+- Include questions that test application, analysis, and evaluation
+- Ensure questions are appropriate for the specified difficulty level
+- Make options similar in length and complexity to avoid obvious answers"""
+    elif question_type == "mixed":
+        format_instruction = "Format your response as a JSON array of objects, where each object has 'question' (string), 'type' ('short_answer' or 'mcq'), and if type is 'mcq', also include 'options' (array of 4 strings) and 'correct_answer' (string)."
+        question_instruction = """Generate a mix of high-quality short answer questions and multiple choice questions:
+- Short answer questions should require explanation, analysis, or problem-solving
+- MCQs should have 4 realistic options with only one correct answer
+- Ensure variety in question types and difficulty levels
+- Make questions test different cognitive levels (knowledge, comprehension, application, analysis)"""
+    else:  # short_answer
+        format_instruction = "Format your response as a JSON array of strings, where each string is a complete question."
+        question_instruction = "Generate short answer questions that require explanation, analysis, or problem-solving."
+    
+    # Build the prompt
+    if input_text:
+        prompt = f"""Based on the following text about {subject or 'the topic'}, generate {num_questions} diverse, well-structured questions that test understanding at {difficulty} level{marks_info}.
+
+Text: {input_text}
+
+Generate questions that:
+- Are clear and specific
+- Test different aspects of the content
+- Are appropriate for {difficulty} difficulty level
+- Cover both conceptual understanding and practical application
+- Are suitable for the specified mark allocation
+- {question_instruction}
+
+{format_instruction}"""
+    else:
+        prompt = f"""Generate {num_questions} diverse, well-structured questions about {subject or 'general topics'} at {difficulty} difficulty level{marks_info}.
+
+The questions should:
+- Be clear and specific
+- Test both conceptual understanding and practical application
+- Be appropriate for {difficulty} difficulty level
+- Cover important aspects of {subject or 'the subject'}
+- Be suitable for the specified mark allocation
+- {question_instruction}
+
+{format_instruction}"""
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are an expert educator who creates high-quality exam questions. Always respond with valid JSON format."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1000,
+            temperature=0.7
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Try to parse JSON response
+        try:
+            questions = json.loads(content)
+            if isinstance(questions, list):
+                # Process different question types
+                processed_questions = []
+                for q in questions[:num_questions]:
+                    if isinstance(q, dict):
+                        # MCQ or mixed format
+                        if 'options' in q and 'correct_answer' in q:
+                            # MCQ format
+                            question_text = q['question']
+                            options = q['options']
+                            correct = q['correct_answer']
+                            formatted_q = f"{question_text}\nA) {options[0]}\nB) {options[1]}\nC) {options[2]}\nD) {options[3]}\nCorrect Answer: {correct}"
+                        else:
+                            # Short answer format
+                            formatted_q = q.get('question', str(q))
+                    else:
+                        # Simple string format
+                        formatted_q = str(q)
+                    
+                    processed_questions.append(formatted_q)
+                
+                # Allocate marks to questions
+                questions_with_marks = allocate_marks_to_questions(processed_questions, total_marks)
+                return [(q, subject or "AI Generated", marks) for q, marks in questions_with_marks]
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract questions from text
+            lines = content.split('\n')
+            questions = []
+            for line in lines:
+                line = line.strip()
+                if line and ('?' in line or line.startswith(('Q', 'Question'))):
+                    # Clean up the line
+                    q = line.replace('Q1.', '').replace('Q2.', '').replace('Q3.', '').replace('Q4.', '').replace('Q5.', '').strip()
+                    if q and len(q) > 10:  # Basic quality check
+                        questions.append(q)
+            
+            # Allocate marks to questions
+            questions_with_marks = allocate_marks_to_questions(questions[:num_questions], total_marks)
+            return [(q, subject or "AI Generated", marks) for q, marks in questions_with_marks]
+        
+    except Exception as e:
+        print(f"OpenAI API error: {e}")
+        return []
+    
+    return []
+
+def generate_realistic_mcq_options(subject: str, topic: str, template: str) -> list:
+    """Generate realistic MCQ options based on subject, topic, and template"""
+    import random
+    
+    # Get subject-specific options
+    subject_options = mcq_options_templates.get(subject, mcq_options_templates["software engineering"])
+    
+    # Try to match topic to option categories
+    topic_lower = topic.lower()
+    matched_category = None
+    
+    for category in subject_options.keys():
+        if category in topic_lower or any(word in topic_lower for word in category.split('_')):
+            matched_category = category
             break
     
-    # If no specific topic found, use general software engineering questions
-    if not questions:
-        questions = se_topics["software engineering"][:desired_count]
+    if matched_category:
+        base_options = subject_options[matched_category][:]
+    else:
+        # Use a random category from the subject
+        base_options = random.choice(list(subject_options.values()))[:]
     
-    # Ensure we have the right number of questions
-    while len(questions) < desired_count:
-        questions.append(f"Explain a key concept in {normalized or 'software engineering'}.")
+    # Create variations and ensure they're realistic
+    options = []
+    for i, base_option in enumerate(base_options):
+        if i == 0:
+            # First option is usually the most direct/obvious
+            options.append(base_option)
+        else:
+            # Create variations that are plausible but wrong
+            variations = [
+                base_option.replace("improved", "reduced").replace("better", "worse"),
+                base_option.replace("increased", "decreased").replace("enhanced", "diminished"),
+                base_option.replace("optimized", "compromised").replace("efficient", "inefficient"),
+                f"Alternative approach to {topic}",
+                f"Different method for {topic}",
+                f"Opposite of {base_option.lower()}",
+                f"Related but incorrect concept"
+            ]
+            options.append(random.choice(variations))
     
-    return [(q, normalized.title() if normalized else (subject_hint or "Software Engineering"), "") for q in questions[:desired_count]]
+    # Ensure all options are unique and realistic
+    while len(set(options)) < 4:
+        options = list(set(options))
+        if len(options) < 4:
+            options.append(f"Additional option related to {topic}")
+    
+    return options[:4]
+
+def allocate_marks_to_questions(questions: list, total_marks: int) -> list:
+    """Allocate marks to questions based on total marks"""
+    if total_marks <= 0 or not questions:
+        return [(q, "") for q in questions]
+    
+    num_questions = len(questions)
+    base_marks = total_marks // num_questions
+    extra_marks = total_marks % num_questions
+    
+    questions_with_marks = []
+    for i, question in enumerate(questions):
+        # Give extra marks to first few questions if there's a remainder
+        marks = base_marks + (1 if i < extra_marks else 0)
+        questions_with_marks.append((question, str(marks)))
+    
+    return questions_with_marks
 
 app = Flask(__name__)
 
@@ -113,30 +485,159 @@ def generate():
     total_marks = int(request.form.get('total_marks', 0) or 0)
     subject = request.form.get('subject') or request.form.get('prompt_subject') or "General"
 
-    if input_text:
-        # Generate questions dynamically using Questgen if available, else fallback
-        if qg is not None:
-            payload = {"input_text": input_text}
-            result = qg.predict_shortq(payload)
-            questions_list = result.get('questions', [])[:num_questions]
-            questions_list = [(q, "", "") for q in questions_list]
+    # Get difficulty and question type from form
+    difficulty = request.form.get('difficulty', 'medium')
+    question_type = request.form.get('question_type', 'short_answer')
+    
+    # Try AI generation first (OpenAI), then Questgen, then fallback
+    questions_list = []
+    
+    # 1. Try OpenAI API first
+    if openai_client:
+        questions_list = generate_ai_questions_openai(input_text, num_questions, subject, difficulty, total_marks, question_type)
+    
+    # 2. If OpenAI fails, try Questgen
+    if not questions_list and qg is not None:
+        try:
+            if input_text:
+                print("input_text", input_text)
+                payload = {"input_text": input_text}
+                result = qg.predict_shortq(payload)
+                print("result", result)
+                raw_questions = result.get('questions', [])[:num_questions]
+                questions_list = [(q, subject or "", difficulty) for q in raw_questions]
+            else:
+                prompt_parts = [p for p in [subject, difficulty] if p]
+                prompt = ", ".join(prompt_parts) or (subject or "General")
+                payload = {"input_text": prompt}
+                result = qg.predict_shortq(payload)
+                raw_questions = result.get('questions', [])[:num_questions]
+                questions_list = [(q, subject or "", difficulty) for q in raw_questions]
+        except Exception as e:
+            print(f"Questgen error: {e}")
+            questions_list = []
+
+    
+    # 3. Fallback to template-based generation
+    if not questions_list:
+        if input_text:
+            questions_list = generate_fallback_questions(input_text, num_questions, subject_hint=subject or "", question_type=question_type)
         else:
-            # Local fallback: generate multiple quiz-style questions from text
-            questions_list = generate_fallback_questions(input_text, num_questions, subject_hint=subject or "")
-    else:
-        # Always AI generation when text is empty; build a prompt from subject + difficulty
-        force_ai = True
-        prompt_parts = [p for p in [subject, request.form.get('difficulty')] if p]
-        prompt = ", ".join(prompt_parts) or (subject or "General")
-        if qg is not None:
-            payload = {"input_text": prompt}
-            result = qg.predict_shortq(payload)
-            raw = result.get('questions', [])[:num_questions]
-            questions_list = [(q, subject or "", "") for q in raw]
-        else:
-            questions_list = generate_fallback_questions(prompt, num_questions, subject_hint=subject or "")
+            prompt_parts = [p for p in [subject, difficulty] if p]
+            prompt = ", ".join(prompt_parts) or (subject or "General")
+            questions_list = generate_fallback_questions(prompt, num_questions, subject_hint=subject or "", question_type=question_type)
+        
+        # Allocate marks to fallback questions if total marks specified
+        if total_marks > 0:
+            questions_with_marks = allocate_marks_to_questions([q[0] for q in questions_list], total_marks)
+            questions_list = [(q, subject or questions_list[0][1] if questions_list else "General", marks) for q, marks in questions_with_marks]
 
     return render_template('paper.html', questions=questions_list)
+
+@app.route('/export_pdf', methods=['POST'])
+def export_pdf():
+    questions_data = request.form.get('questions_data')
+    subject = request.form.get('subject', 'Question Paper')
+    
+    if not questions_data:
+        return "No questions data provided", 400
+    
+    # Parse questions from the form data
+    import json
+    try:
+        questions = json.loads(questions_data)
+    except:
+        return "Invalid questions data", 400
+    
+    # Create PDF in memory
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=18)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=16,
+        spaceAfter=30,
+        alignment=1  # Center alignment
+    )
+    question_style = ParagraphStyle(
+        'CustomQuestion',
+        parent=styles['Normal'],
+        fontSize=12,
+        spaceAfter=12,
+        leftIndent=20
+    )
+    
+    # Build content
+    story = []
+    story.append(Paragraph(f"{subject} - Question Paper", title_style))
+    story.append(Spacer(1, 20))
+    
+    for i, question in enumerate(questions, 1):
+        if isinstance(question, list) and len(question) > 0:
+            question_text = question[0]
+        else:
+            question_text = str(question)
+        
+        story.append(Paragraph(f"Q{i}. {question_text}", question_style))
+        story.append(Spacer(1, 10))
+    
+    # Build PDF
+    doc.build(story)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename="{subject.replace(" ", "_")}_questions.pdf"'
+    
+    return response
+
+@app.route('/export_docx', methods=['POST'])
+def export_docx():
+    questions_data = request.form.get('questions_data')
+    subject = request.form.get('subject', 'Question Paper')
+    
+    if not questions_data:
+        return "No questions data provided", 400
+    
+    # Parse questions from the form data
+    import json
+    try:
+        questions = json.loads(questions_data)
+    except:
+        return "Invalid questions data", 400
+    
+    # Create DOCX document
+    doc = Document()
+    
+    # Add title
+    title = doc.add_heading(f"{subject} - Question Paper", 0)
+    title.alignment = 1  # Center alignment
+    
+    # Add questions
+    for i, question in enumerate(questions, 1):
+        if isinstance(question, list) and len(question) > 0:
+            question_text = question[0]
+        else:
+            question_text = str(question)
+        
+        doc.add_paragraph(f"Q{i}. {question_text}")
+        doc.add_paragraph()  # Add spacing
+    
+    # Save to memory
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    
+    # Create response
+    response = make_response(buffer.getvalue())
+    response.headers['Content-Type'] = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    response.headers['Content-Disposition'] = f'attachment; filename="{subject.replace(" ", "_")}_questions.docx"'
+    
+    return response
 
 if __name__ == "__main__":
     app.run(debug=True)
