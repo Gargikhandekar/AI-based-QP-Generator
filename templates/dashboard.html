@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - AI Question Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Welcome, {{ current_user.username }}!</h1>
+            <div class="user-actions">
+                <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate Questions</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+            </div>
+        </div>
+
+        <div class="dashboard-content">
+            <h2>Recent Question Sets</h2>
+            
+            {% if questions %}
+                <div class="question-history">
+                    {% for question_set in questions %}
+                        <div class="question-set">
+                            <div class="question-set-header">
+                                <h3>{{ question_set.subject }}</h3>
+                                <div class="question-set-meta">
+                                    <span class="type">{{ question_set.question_type.title() }}</span>
+                                    <span class="difficulty">{{ question_set.difficulty }}</span>
+                                    <span class="date">{{ question_set.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                </div>
+                            </div>
+                            <div class="question-preview">
+                                {% set questions_list = question_set.questions_generated | from_json %}
+                                {% for question, topic, marks in questions_list[:3] %}
+                                    <p>{{ loop.index }}. {{ question }}</p>
+                                {% endfor %}
+                                {% if questions_list|length > 3 %}
+                                    <p class="more">... and {{ questions_list|length - 3 }} more questions</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="no-questions">
+                    <p>You haven't generated any questions yet.</p>
+                    <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate Your First Questions</a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

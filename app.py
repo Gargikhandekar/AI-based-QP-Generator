@@ -1,4 +1,10 @@
-from flask import Flask, render_template, request, send_file, make_response
+from flask import Flask, render_template, request, send_file, make_response, redirect, url_for, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_wtf import FlaskForm
+from wtforms import StringField, PasswordField, SubmitField, TextAreaField, SelectField, IntegerField
+from wtforms.validators import DataRequired, Email, Length, EqualTo
+from werkzeug.security import generate_password_hash, check_password_hash
 import nltk
 from generator import allocate_questions
 from reportlab.lib.pagesizes import letter, A4
@@ -13,6 +19,7 @@ import os
 import openai
 from dotenv import load_dotenv
 import json
+from datetime import datetime
 
 # Try to import Questgen; if unavailable, we'll use a local fallback
 qg = None
@@ -468,14 +475,147 @@ def allocate_marks_to_questions(questions: list, total_marks: int) -> list:
     return questions_with_marks
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key-change-this-in-production'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize extensions
+db = SQLAlchemy(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Please log in to access this page.'
 
 # qg is initialized above; may be None if Questgen not available
 
+# User model
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(120), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    questions = db.relationship('QuestionHistory', backref='user', lazy=True)
+
+# Question History model
+class QuestionHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    question_type = db.Column(db.String(50), nullable=False)
+    difficulty = db.Column(db.String(50), nullable=False)
+    questions_generated = db.Column(db.Text, nullable=False)  # JSON string of questions
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# Custom filter for JSON parsing in templates
+@app.template_filter('from_json')
+def from_json_filter(json_string):
+    import json
+    try:
+        return json.loads(json_string)
+    except:
+        return []
+
+# Forms
+class LoginForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired()])
+    submit = SubmitField('Login')
+
+class SignupForm(FlaskForm):
+    username = StringField('Username', validators=[DataRequired(), Length(min=4, max=20)])
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
+    confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
+    submit = SubmitField('Sign Up')
+
+class QuestionForm(FlaskForm):
+    input_text = TextAreaField('Enter text to generate questions (optional)', render_kw={"rows": 6, "placeholder": "Enter paragraph or text here to generate questions..."})
+    prompt_subject = StringField('Subject / Topic', render_kw={"placeholder": "e.g., Software Engineering"})
+    difficulty = SelectField('Select difficulty', choices=[('', 'Any'), ('Easy', 'Easy'), ('Medium', 'Medium'), ('Hard', 'Hard')])
+    num_questions = IntegerField('Number of questions', validators=[DataRequired()], default=5, render_kw={"min": 1, "max": 20})
+    question_type = SelectField('Question Type', choices=[('short_answer', 'Short Answer'), ('mcq', 'Multiple Choice'), ('mixed', 'Mixed')], default='short_answer')
+    force_ai = SelectField('Force AI generation', choices=[('0', 'No'), ('1', 'Yes')], default='0')
+    submit = SubmitField('Generate Questions')
+
 @app.route('/')
 def home():
-    return render_template('index.html')
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    return redirect(url_for('login'))
 
-@app.route('/generate', methods=['POST'])
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    form = LoginForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user and check_password_hash(user.password_hash, form.password.data):
+            login_user(user)
+            return redirect(url_for('dashboard'))
+        else:
+            flash('Invalid username or password', 'error')
+    
+    return render_template('login.html', form=form)
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    
+    form = SignupForm()
+    if form.validate_on_submit():
+        # Check if user already exists
+        if User.query.filter_by(username=form.username.data).first():
+            flash('Username already exists', 'error')
+            return render_template('signup.html', form=form)
+        
+        if User.query.filter_by(email=form.email.data).first():
+            flash('Email already registered', 'error')
+            return render_template('signup.html', form=form)
+        
+        # Create new user
+        user = User(
+            username=form.username.data,
+            email=form.email.data,
+            password_hash=generate_password_hash(form.password.data)
+        )
+        db.session.add(user)
+        db.session.commit()
+        
+        flash('Account created successfully! Please log in.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('signup.html', form=form)
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out', 'info')
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Get user's question history
+    questions = QuestionHistory.query.filter_by(user_id=current_user.id).order_by(QuestionHistory.created_at.desc()).limit(10).all()
+    return render_template('dashboard.html', questions=questions)
+
+@app.route('/generate_questions')
+@login_required
+def generate_questions():
+    form = QuestionForm()
+    return render_template('index.html', form=form)
+
+@app.route('/generate', methods=['GET', 'POST'])
+@login_required
 def generate():
     # Optionally get inputs for Questgen from the form (e.g. text or subject)
     input_text = request.form.get('input_text')  # A text paragraph for question generation
@@ -531,6 +671,18 @@ def generate():
         if total_marks > 0:
             questions_with_marks = allocate_marks_to_questions([q[0] for q in questions_list], total_marks)
             questions_list = [(q, subject or questions_list[0][1] if questions_list else "General", marks) for q, marks in questions_with_marks]
+
+    # Save questions to database
+    if questions_list:
+        question_history = QuestionHistory(
+            user_id=current_user.id,
+            subject=subject or "General",
+            question_type=request.form.get('question_type', 'short_answer'),
+            difficulty=request.form.get('difficulty', 'Any'),
+            questions_generated=json.dumps(questions_list)
+        )
+        db.session.add(question_history)
+        db.session.commit()
 
     return render_template('paper.html', questions=questions_list)
 
@@ -640,4 +792,6 @@ def export_docx():
     return response
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
