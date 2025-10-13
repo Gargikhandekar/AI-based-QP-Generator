@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, send_file, make_response, redirect, url_for, flash
+from flask import Flask, render_template, request, send_file, make_response, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from flask_wtf import FlaskForm
@@ -497,6 +497,17 @@ class User(UserMixin, db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     questions = db.relationship('QuestionHistory', backref='user', lazy=True)
 
+# Question database model for pre-existing questions
+class Question(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    subject = db.Column(db.String(100), nullable=False)
+    topic = db.Column(db.String(100), nullable=False)
+    difficulty = db.Column(db.String(20), nullable=False)
+    question_type = db.Column(db.String(20), nullable=False)  # short_answer, mcq
+    question_text = db.Column(db.Text, nullable=False)
+    marks = db.Column(db.Integer, default=1)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 # Question History model
 class QuestionHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -520,6 +531,53 @@ def from_json_filter(json_string):
     except:
         return []
 
+# Function to seed the database with pre-existing questions
+def seed_questions():
+    """Add pre-existing questions to the database if they don't exist"""
+    if Question.query.count() > 0:
+        return  # Database already has questions
+    
+    questions_data = [
+        # Software Engineering Questions
+        {"subject": "software engineering", "topic": "SDLC", "difficulty": "Easy", "question_type": "short_answer", "question_text": "What are the main phases of the Software Development Life Cycle?", "marks": 2},
+        {"subject": "software engineering", "topic": "SDLC", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Compare Waterfall and Agile development models. When would you use each?", "marks": 5},
+        {"subject": "software engineering", "topic": "Requirements", "difficulty": "Easy", "question_type": "short_answer", "question_text": "Differentiate between functional and non-functional requirements with examples.", "marks": 3},
+        {"subject": "software engineering", "topic": "Testing", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Explain the difference between verification and validation in software testing.", "marks": 4},
+        {"subject": "software engineering", "topic": "Design", "difficulty": "Hard", "question_type": "short_answer", "question_text": "Explain the SOLID principles with examples for each principle.", "marks": 8},
+        {"subject": "software engineering", "topic": "Design", "difficulty": "Medium", "question_type": "short_answer", "question_text": "What are design patterns? Explain Factory and Observer patterns with use cases.", "marks": 6},
+        {"subject": "software engineering", "topic": "Testing", "difficulty": "Easy", "question_type": "short_answer", "question_text": "List the different levels of software testing.", "marks": 2},
+        {"subject": "software engineering", "topic": "CI/CD", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Explain Continuous Integration and Continuous Deployment (CI/CD) pipeline.", "marks": 5},
+        
+        # Data Structures Questions
+        {"subject": "data structures", "topic": "Arrays", "difficulty": "Easy", "question_type": "short_answer", "question_text": "Compare arrays and linked lists. What are their advantages and disadvantages?", "marks": 4},
+        {"subject": "data structures", "topic": "Trees", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Explain different tree traversal methods (preorder, inorder, postorder) with examples.", "marks": 5},
+        {"subject": "data structures", "topic": "Complexity", "difficulty": "Easy", "question_type": "short_answer", "question_text": "What is Big O notation? Give examples of O(1), O(n), and O(n²) algorithms.", "marks": 3},
+        {"subject": "data structures", "topic": "Sorting", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Compare the time complexity of Bubble Sort, Quick Sort, and Merge Sort.", "marks": 4},
+        {"subject": "data structures", "topic": "Graphs", "difficulty": "Hard", "question_type": "short_answer", "question_text": "Explain BFS and DFS algorithms. When would you use each?", "marks": 6},
+        {"subject": "data structures", "topic": "Hash Tables", "difficulty": "Medium", "question_type": "short_answer", "question_text": "How do hash tables work? Explain collision resolution techniques.", "marks": 5},
+        
+        # Database Questions
+        {"subject": "database", "topic": "ACID", "difficulty": "Easy", "question_type": "short_answer", "question_text": "Explain ACID properties in database transactions.", "marks": 3},
+        {"subject": "database", "topic": "Normalization", "difficulty": "Medium", "question_type": "short_answer", "question_text": "What is database normalization? Explain 1NF, 2NF, and 3NF with examples.", "marks": 6},
+        {"subject": "database", "topic": "SQL vs NoSQL", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Compare SQL and NoSQL databases. When would you use each?", "marks": 5},
+        {"subject": "database", "topic": "Indexing", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Explain database indexing and its impact on query performance.", "marks": 4},
+        {"subject": "database", "topic": "Relationships", "difficulty": "Easy", "question_type": "short_answer", "question_text": "Describe different types of database relationships with examples.", "marks": 3},
+        
+        # Data Architecture Questions
+        {"subject": "data architecture", "topic": "Data Warehouse", "difficulty": "Medium", "question_type": "short_answer", "question_text": "What is a data warehouse? Explain its key characteristics and benefits.", "marks": 4},
+        {"subject": "data architecture", "topic": "ETL", "difficulty": "Medium", "question_type": "short_answer", "question_text": "Explain the ETL process with examples.", "marks": 5},
+        {"subject": "data architecture", "topic": "Data Lake", "difficulty": "Hard", "question_type": "short_answer", "question_text": "Compare data lake and data warehouse. What is a data lakehouse?", "marks": 6},
+        {"subject": "data architecture", "topic": "OLTP vs OLAP", "difficulty": "Easy", "question_type": "short_answer", "question_text": "Differentiate between OLTP and OLAP systems.", "marks": 3},
+        {"subject": "data architecture", "topic": "Data Governance", "difficulty": "Hard", "question_type": "short_answer", "question_text": "What is data governance? Explain its key components and importance.", "marks": 7},
+    ]
+    
+    for q_data in questions_data:
+        question = Question(**q_data)
+        db.session.add(question)
+    
+    db.session.commit()
+    print(f"Seeded {len(questions_data)} questions to the database")
+
 # Forms
 class LoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
@@ -534,13 +592,13 @@ class SignupForm(FlaskForm):
     submit = SubmitField('Sign Up')
 
 class QuestionForm(FlaskForm):
+    question_source = SelectField('Question Source', choices=[('generate', 'Generate New Questions'), ('database', 'Use Existing Questions from Database')], default='generate')
     input_text = TextAreaField('Enter text to generate questions (optional)', render_kw={"rows": 6, "placeholder": "Enter paragraph or text here to generate questions..."})
     prompt_subject = StringField('Subject / Topic', render_kw={"placeholder": "e.g., Software Engineering"})
     difficulty = SelectField('Select difficulty', choices=[('', 'Any'), ('Easy', 'Easy'), ('Medium', 'Medium'), ('Hard', 'Hard')])
     num_questions = IntegerField('Number of questions', validators=[DataRequired()], default=5, render_kw={"min": 1, "max": 20})
     question_type = SelectField('Question Type', choices=[('short_answer', 'Short Answer'), ('mcq', 'Multiple Choice'), ('mixed', 'Mixed')], default='short_answer')
-    force_ai = SelectField('Force AI generation', choices=[('0', 'No'), ('1', 'Yes')], default='0')
-    submit = SubmitField('Generate Questions')
+    submit = SubmitField('Get Questions')
 
 @app.route('/')
 def home():
@@ -598,6 +656,7 @@ def signup():
 @login_required
 def logout():
     logout_user()
+    session.clear()
     flash('You have been logged out', 'info')
     return redirect(url_for('login'))
 
@@ -617,74 +676,100 @@ def generate_questions():
 @app.route('/generate', methods=['GET', 'POST'])
 @login_required
 def generate():
-    # Optionally get inputs for Questgen from the form (e.g. text or subject)
-    input_text = request.form.get('input_text')  # A text paragraph for question generation
-    num_questions = int(request.form.get('num_questions', 5))
-
-    # AI-only fields
-    total_marks = int(request.form.get('total_marks', 0) or 0)
-    subject = request.form.get('subject') or request.form.get('prompt_subject') or "General"
-
-    # Get difficulty and question type from form
-    difficulty = request.form.get('difficulty', 'medium')
-    question_type = request.form.get('question_type', 'short_answer')
+    form = QuestionForm()
     
-    # Try AI generation first (OpenAI), then Questgen, then fallback
-    questions_list = []
-    
-    # 1. Try OpenAI API first
-    if openai_client:
-        questions_list = generate_ai_questions_openai(input_text, num_questions, subject, difficulty, total_marks, question_type)
-    
-    # 2. If OpenAI fails, try Questgen
-    if not questions_list and qg is not None:
-        try:
-            if input_text:
-                print("input_text", input_text)
-                payload = {"input_text": input_text}
-                result = qg.predict_shortq(payload)
-                print("result", result)
-                raw_questions = result.get('questions', [])[:num_questions]
-                questions_list = [(q, subject or "", difficulty) for q in raw_questions]
-            else:
-                prompt_parts = [p for p in [subject, difficulty] if p]
-                prompt = ", ".join(prompt_parts) or (subject or "General")
-                payload = {"input_text": prompt}
-                result = qg.predict_shortq(payload)
-                raw_questions = result.get('questions', [])[:num_questions]
-                questions_list = [(q, subject or "", difficulty) for q in raw_questions]
-        except Exception as e:
-            print(f"Questgen error: {e}")
-            questions_list = []
-
-    
-    # 3. Fallback to template-based generation
-    if not questions_list:
-        if input_text:
-            questions_list = generate_fallback_questions(input_text, num_questions, subject_hint=subject or "", question_type=question_type)
-        else:
-            prompt_parts = [p for p in [subject, difficulty] if p]
-            prompt = ", ".join(prompt_parts) or (subject or "General")
-            questions_list = generate_fallback_questions(prompt, num_questions, subject_hint=subject or "", question_type=question_type)
+    if form.validate_on_submit():
+        question_source = form.question_source.data
+        num_questions = form.num_questions.data
+        subject = form.prompt_subject.data or "General"
+        difficulty = form.difficulty.data or ""
+        question_type = form.question_type.data
         
-        # Allocate marks to fallback questions if total marks specified
-        if total_marks > 0:
-            questions_with_marks = allocate_marks_to_questions([q[0] for q in questions_list], total_marks)
-            questions_list = [(q, subject or questions_list[0][1] if questions_list else "General", marks) for q, marks in questions_with_marks]
+        if question_source == 'database':
+            # Get questions from database
+            query = Question.query
+            
+            # Filter by subject if provided
+            if subject and subject.lower() != "general":
+                query = query.filter(Question.subject.ilike(f"%{subject.lower()}%"))
+            
+            # Filter by difficulty if provided
+            if difficulty:
+                query = query.filter(Question.difficulty == difficulty)
+            
+            # Filter by question type if provided
+            if question_type != 'mixed':
+                query = query.filter(Question.question_type == question_type)
+            
+            # Get random questions
+            questions = query.order_by(db.func.random()).limit(num_questions).all()
+            
+            if questions:
+                questions_list = [(q.question_text, q.topic, q.marks) for q in questions]
+            else:
+                flash('No questions found in database matching your criteria. Try generating new questions instead.', 'info')
+                return render_template('index.html', form=form)
+        
+        else:
+            # Generate new questions (existing logic)
+            input_text = form.input_text.data
+            total_marks = int(request.form.get('total_marks', 0) or 0)
+            
+            # Try AI generation first (OpenAI), then Questgen, then fallback
+            questions_list = []
+            
+            # 1. Try OpenAI API first
+            if openai_client:
+                questions_list = generate_ai_questions_openai(input_text, num_questions, subject, difficulty, total_marks, question_type)
+            
+            # 2. If OpenAI fails, try Questgen
+            if not questions_list and qg is not None:
+                try:
+                    if input_text:
+                        payload = {"input_text": input_text}
+                        result = qg.predict_shortq(payload)
+                        raw_questions = result.get('questions', [])[:num_questions]
+                        questions_list = [(q, subject or "", difficulty) for q in raw_questions]
+                    else:
+                        prompt_parts = [p for p in [subject, difficulty] if p]
+                        prompt = ", ".join(prompt_parts) or (subject or "General")
+                        payload = {"input_text": prompt}
+                        result = qg.predict_shortq(payload)
+                        raw_questions = result.get('questions', [])[:num_questions]
+                        questions_list = [(q, subject or "", difficulty) for q in raw_questions]
+                except Exception as e:
+                    print(f"Questgen error: {e}")
+                    questions_list = []
 
-    # Save questions to database
-    if questions_list:
-        question_history = QuestionHistory(
-            user_id=current_user.id,
-            subject=subject or "General",
-            question_type=request.form.get('question_type', 'short_answer'),
-            difficulty=request.form.get('difficulty', 'Any'),
-            questions_generated=json.dumps(questions_list)
-        )
-        db.session.add(question_history)
-        db.session.commit()
+            # 3. Fallback to template-based generation
+            if not questions_list:
+                if input_text:
+                    questions_list = generate_fallback_questions(input_text, num_questions, subject_hint=subject or "", question_type=question_type)
+                else:
+                    prompt_parts = [p for p in [subject, difficulty] if p]
+                    prompt = ", ".join(prompt_parts) or (subject or "General")
+                    questions_list = generate_fallback_questions(prompt, num_questions, subject_hint=subject or "", question_type=question_type)
 
-    return render_template('paper.html', questions=questions_list)
+            # Allocate marks to fallback questions if total marks specified
+            if total_marks > 0:
+                questions_with_marks = allocate_marks_to_questions([q[0] for q in questions_list], total_marks)
+                questions_list = [(q, subject or questions_list[0][1] if questions_list else "General", marks) for q, marks in questions_with_marks]
+
+        # Save questions to database
+        if questions_list:
+            question_history = QuestionHistory(
+                user_id=current_user.id,
+                subject=subject or "General",
+                question_type=question_type,
+                difficulty=difficulty or "Any",
+                questions_generated=json.dumps(questions_list)
+            )
+            db.session.add(question_history)
+            db.session.commit()
+
+        return render_template('paper.html', questions=questions_list)
+    
+    return render_template('index.html', form=form)
 
 @app.route('/export_pdf', methods=['POST'])
 def export_pdf():
@@ -747,6 +832,14 @@ def export_pdf():
     
     return response
 
+# Prevent caching of pages with user data to avoid showing after logout
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 @app.route('/export_docx', methods=['POST'])
 def export_docx():
     questions_data = request.form.get('questions_data')
@@ -794,4 +887,5 @@ def export_docx():
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
+        seed_questions()  # Add pre-existing questions to database
     app.run(debug=True)

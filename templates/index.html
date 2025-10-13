@@ -10,9 +10,14 @@
     <div class="header">
         <h1>AI Question Generator</h1>
         <div class="user-actions">
-            <span>Welcome, {{ current_user.username }}!</span>
-            <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
-            <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+            {% if current_user.is_authenticated %}
+                <span>Welcome, {{ current_user.username }}!</span>
+                <a href="{{ url_for('dashboard') }}" class="btn btn-secondary">Dashboard</a>
+                <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
+            {% else %}
+                <a href="{{ url_for('login') }}" class="btn btn-secondary">Login</a>
+                <a href="{{ url_for('signup') }}" class="btn btn-secondary">Sign Up</a>
+            {% endif %}
         </div>
     </div>
 
@@ -27,6 +32,14 @@
     <form method="POST" action="{{ url_for('generate') }}">
         {{ form.hidden_tag() }}
         
+        <div class="form-group">
+            {{ form.question_source.label(class="form-label") }}
+            {{ form.question_source(class="form-control") }}
+            {% if form.question_source.errors %}
+                <div class="error">{{ form.question_source.errors[0] }}</div>
+            {% endif %}
+        </div>
+
         <div class="form-group">
             {{ form.input_text.label(class="form-label") }}
             {{ form.input_text(class="form-control") }}
@@ -64,14 +77,6 @@
             {{ form.question_type(class="form-control") }}
             {% if form.question_type.errors %}
                 <div class="error">{{ form.question_type.errors[0] }}</div>
-            {% endif %}
-        </div>
-
-        <div class="form-group">
-            {{ form.force_ai.label(class="form-label") }}
-            {{ form.force_ai(class="form-control") }}
-            {% if form.force_ai.errors %}
-                <div class="error">{{ form.force_ai.errors[0] }}</div>
             {% endif %}
         </div>
 

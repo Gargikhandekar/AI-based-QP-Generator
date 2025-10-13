@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Welcome, {{ current_user.username }}!</h1>
+            <h1>Welcome{% if current_user.is_authenticated %}, {{ current_user.username }}{% endif %}!</h1>
             <div class="user-actions">
                 <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate Questions</a>
                 <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>

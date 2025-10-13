@@ -18,12 +18,12 @@
             {% endif %}
         {% endwith %}
 
-        <form method="POST" action="{{ url_for('login') }}">
+        <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
             {{ form.hidden_tag() }}
             
             <div class="form-group">
                 {{ form.username.label(class="form-label") }}
-                {{ form.username(class="form-control") }}
+                {{ form.username(class="form-control", autocomplete="off", autocapitalize="none", spellcheck="false", value="") }}
                 {% if form.username.errors %}
                     <div class="error">{{ form.username.errors[0] }}</div>
                 {% endif %}
@@ -31,7 +31,7 @@
 
             <div class="form-group">
                 {{ form.password.label(class="form-label") }}
-                {{ form.password(class="form-control") }}
+                {{ form.password(class="form-control", autocomplete="new-password", value="") }}
                 {% if form.password.errors %}
                     <div class="error">{{ form.password.errors[0] }}</div>
                 {% endif %}
