@@ -29,7 +29,7 @@
         {% endif %}
     {% endwith %}
 
-    <form method="POST" action="{{ url_for('generate') }}">
+    <form method="POST" action="{{ url_for('generate') }}" enctype="multipart/form-data">
         {{ form.hidden_tag() }}
         
         <div class="form-group">
@@ -46,6 +46,12 @@
             {% if form.input_text.errors %}
                 <div class="error">{{ form.input_text.errors[0] }}</div>
             {% endif %}
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Upload file (PDF or PPTX)</label>
+            <input type="file" name="upload" accept=".pdf,.ppt,.pptx" class="form-control">
+            <div class="hint">If provided, we'll extract text and generate questions from it.</div>
         </div>
 
         <div class="form-group">

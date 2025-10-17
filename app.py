@@ -5,6 +5,7 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField, TextAreaField, SelectField, IntegerField
 from wtforms.validators import DataRequired, Email, Length, EqualTo
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import nltk
 from generator import allocate_questions
 from reportlab.lib.pagesizes import letter, A4
@@ -39,6 +40,7 @@ except Exception:
 			qg = None
 
 nltk.download('punkt')
+nltk.download('stopwords')
 
 # Enhanced options templates with realistic alternatives
 mcq_options_templates = {
@@ -204,13 +206,10 @@ def generate_fallback_questions(input_text: str, desired_count: int, subject_hin
         ]
     }
 
-    # Seed with any keywords from input_text as extra subtopics
+    # Seed with topics extracted from input text
     extra_topics = []
     if input_text:
-        # Extract candidate keywords (very lightweight heuristic)
-        words = [w for w in re.findall(r"[A-Za-z][A-Za-z\-/]+", input_text) if len(w) > 3]
-        # sample unique tokens
-        extra_topics = list(dict.fromkeys(w.lower() for w in words))[:10]
+        extra_topics = extract_topics_from_text(input_text, max_topics=12)
 
     pool = subtopics + extra_topics
     if not pool:
@@ -281,11 +280,68 @@ def generate_fallback_questions(input_text: str, desired_count: int, subject_hin
         else:
             questions.append(f"Discuss a key concept in {chosen_subject} and its practical implications.")
 
-    # Return tuples: (question, subject, difficulty)
-    display_subject = normalized.title() if normalized else (subject_hint or chosen_subject.title())
+    # Build concise subject/topics summary for display
+    topics_summary = ", ".join(t.title() for t in pool[:5]) if pool else chosen_subject.title()
+    display_subject = subject_hint or topics_summary or chosen_subject.title()
+    # Return tuples: (question, subject/topics summary, difficulty)
     return [(q, display_subject, difficulty) for q in questions[:desired_count]]
 
-def generate_ai_questions_openai(input_text: str, num_questions: int, subject: str = "", difficulty: str = "medium", total_marks: int = 0, question_type: str = "short_answer") -> list:
+def extract_topics_from_text(text: str, max_topics: int = 12) -> list:
+    """Extract salient topics/phrases from raw text using simple statistical heuristics.
+    Avoids heavy POS taggers to keep dependencies light.
+    """
+    import re
+    from collections import Counter
+    from nltk.corpus import stopwords
+
+    if not text:
+        return []
+
+    stop = set(stopwords.words('english'))
+    # Basic cleanup
+    cleaned = re.sub(r"[^A-Za-z0-9\-\s]", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    # Candidate words (exclude short/common tokens)
+    tokens = [t.lower() for t in cleaned.split(" ") if len(t) > 2 and t.lower() not in stop]
+
+    # Build bigrams for more specific topics
+    bigrams = [f"{tokens[i]} {tokens[i+1]}" for i in range(len(tokens)-1)
+               if tokens[i] not in stop and tokens[i+1] not in stop]
+
+    # Count frequencies
+    unigram_counts = Counter(tokens)
+    bigram_counts = Counter(bigrams)
+
+    # Boost bigrams so they rank higher than generic singletons
+    scored = {}
+    for term, c in unigram_counts.items():
+        scored[term] = scored.get(term, 0) + c
+    for term, c in bigram_counts.items():
+        scored[term] = scored.get(term, 0) + c * 2
+
+    # Promote Title-Case phrases (likely proper topics) found in original text
+    title_phrases = re.findall(r"(?:[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)", text)
+    for phrase in title_phrases:
+        key = phrase.strip().lower()
+        scored[key] = scored.get(key, 0) + 3
+
+    # Sort by score and length to prefer informative phrases
+    candidates = sorted(scored.items(), key=lambda kv: (kv[1], len(kv[0])), reverse=True)
+
+    topics = []
+    seen = set()
+    for term, _ in candidates:
+        # Skip overly generic terms
+        if term in seen or term in {"introduction", "summary", "conclusion", "overview"}:
+            continue
+        seen.add(term)
+        topics.append(term)
+        if len(topics) >= max_topics:
+            break
+    return topics
+
+def generate_ai_questions_openai(input_text: str, num_questions: int, subject: str = "", difficulty: str = "medium", total_marks: int = 0, question_type: str = "short_answer", topics: list | None = None) -> list:
     """Generate questions using OpenAI API"""
     if not openai_client:
         return []
@@ -320,22 +376,26 @@ def generate_ai_questions_openai(input_text: str, num_questions: int, subject: s
         question_instruction = "Generate short answer questions that require explanation, analysis, or problem-solving."
     
     # Build the prompt
+    topics_clause = ""
+    if topics:
+        topics_clause = "\nKey topics to prioritize (ordered):\n- " + "\n- ".join(topics[:12]) + "\n"
     if input_text:
-        prompt = f"""Based on the following text about {subject or 'the topic'}, generate {num_questions} diverse, well-structured questions that test understanding at {difficulty} level{marks_info}.
+        prompt = f"""Based on the following source text about {subject or 'the topic'}, generate {num_questions} high-quality questions that test understanding at {difficulty} level{marks_info}.
 
 Text: {input_text}
 
-Generate questions that:
-- Are clear and specific
-- Test different aspects of the content
-- Are appropriate for {difficulty} difficulty level
-- Cover both conceptual understanding and practical application
-- Are suitable for the specified mark allocation
+Instructions:
+- Use the source text faithfully. Prefer the following topics if relevant:
+{topics_clause}
+- Avoid trivial definitions. Include application and analysis where possible.
+- Vary verbs and cognitive levels (Bloom's taxonomy).
+- Use precise technical terminology from the text.
+- Keep each question self-contained and unambiguous.
 - {question_instruction}
 
 {format_instruction}"""
     else:
-        prompt = f"""Generate {num_questions} diverse, well-structured questions about {subject or 'general topics'} at {difficulty} difficulty level{marks_info}.
+        prompt = f"""Generate {num_questions} high-quality questions about {subject or 'general topics'} at {difficulty} difficulty level{marks_info}.
 
 The questions should:
 - Be clear and specific
@@ -354,8 +414,8 @@ The questions should:
                 {"role": "system", "content": "You are an expert educator who creates high-quality exam questions. Always respond with valid JSON format."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
-            temperature=0.7
+            max_tokens=1400,
+            temperature=0.4
         )
         
         content = response.choices[0].message.content.strip()
@@ -479,6 +539,71 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-change-this-in-production'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['MAX_CONTENT_LENGTH'] = 20 * 1024 * 1024  # 20 MB upload limit
+
+ALLOWED_EXTENSIONS = {'.pdf', '.ppt', '.pptx'}
+
+def allowed_file(filename: str) -> bool:
+    _, ext = os.path.splitext(filename.lower())
+    return ext in ALLOWED_EXTENSIONS
+
+def extract_text_from_pdf(file_stream: io.BytesIO) -> str:
+    try:
+        from PyPDF2 import PdfReader
+        reader = PdfReader(file_stream)
+        texts = []
+        for page in reader.pages:
+            texts.append(page.extract_text() or '')
+        return '\n'.join(texts).strip()
+    except Exception as e:
+        print(f"PDF extract error: {e}")
+        return ''
+
+def extract_text_from_pptx(file_stream: io.BytesIO) -> str:
+    try:
+        from pptx import Presentation
+        prs = Presentation(file_stream)
+        texts = []
+        for slide in prs.slides:
+            for shape in slide.shapes:
+                if hasattr(shape, 'text'):
+                    texts.append(shape.text)
+        return '\n'.join(texts).strip()
+    except Exception as e:
+        print(f"PPTX extract error: {e}")
+        return ''
+
+def clean_extracted_text(text: str) -> str:
+    """Remove obvious metadata like instructor names, dates, contacts, and headers.
+    Keeps only substantive content lines.
+    """
+    import re
+    if not text:
+        return text
+    noise_patterns = [
+        r"professor|associate|assistant|faculty|instructor|dr\.|mr\.|ms\.|mrs\.|prof\.",
+        r"department|dept\.|school of|college of|university|institute|campus",
+        r"contact|phone|mobile|email|mailto|www\.|http[s]?://",
+        r"^\s*page\s+\d+|^\s*\d+\s*/\s*\d+\s*$",
+        r"\bjan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(t)?(ember)?|oct(ober)?|nov(ember)?|dec(ember)?\b",
+        r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b",  # dates
+        r"\b\d{4}\b",  # standalone years
+    ]
+    noise_re = re.compile("(" + ")|(".join(noise_patterns) + ")", re.IGNORECASE)
+    cleaned_lines = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        # drop very short lines or bullet-only lines
+        if len(line.split()) < 3:
+            continue
+        if noise_re.search(line):
+            continue
+        # remove excessive bullets/dots
+        line = re.sub(r"[•·]+", " ", line)
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines)
 # Session/cookie security settings
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -760,6 +885,26 @@ def generate():
         difficulty = form.difficulty.data or ""
         question_type = form.question_type.data
         
+        # If a file is uploaded, extract text and override input_text for generation
+        upload = request.files.get('upload')
+        if upload and upload.filename and allowed_file(upload.filename):
+            filename = secure_filename(upload.filename)
+            _, ext = os.path.splitext(filename.lower())
+            file_bytes = io.BytesIO(upload.read())
+            extracted = ''
+            if ext == '.pdf':
+                extracted = extract_text_from_pdf(file_bytes)
+            else:
+                # supports .ppt and .pptx via python-pptx
+                extracted = extract_text_from_pptx(file_bytes)
+            if extracted:
+                extracted = clean_extracted_text(extracted)
+                # Prepend uploaded content to any typed text
+                if form.input_text.data:
+                    form.input_text.data = f"{extracted}\n\n{form.input_text.data}"
+                else:
+                    form.input_text.data = extracted
+
         if question_source == 'database':
             # Get questions from database
             query = Question.query
@@ -795,7 +940,10 @@ def generate():
             
             # 1. Try OpenAI API first
             if openai_client:
-                questions_list = generate_ai_questions_openai(input_text, num_questions, subject, difficulty, total_marks, question_type)
+                # Provide extracted topics (if any) for better guidance, after cleaning noise
+                clean_for_topics = clean_extracted_text(input_text) if input_text else ""
+                extracted_topics = extract_topics_from_text(clean_for_topics, max_topics=12) if clean_for_topics else []
+                questions_list = generate_ai_questions_openai(input_text, num_questions, subject, difficulty, total_marks, question_type, topics=extracted_topics)
             
             # 2. If OpenAI fails, try Questgen
             if not questions_list and qg is not None:

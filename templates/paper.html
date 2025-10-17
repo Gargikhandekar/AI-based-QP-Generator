@@ -35,7 +35,14 @@
                             {{ question }}
                         {% endif %}
                         <br />
-                        <strong>Topic:</strong> {{ topic }}<br />
+                        <strong>Topics:</strong> 
+                        {% set summary = (topic or '') %}
+                        {% if summary|length > 140 %}
+                            {{ summary[:140] }}... <span class="muted" title="{{ summary }}">see more</span>
+                        {% else %}
+                            {{ summary }}
+                        {% endif %}
+                        <br />
                         <strong>Marks:</strong> {{ marks }}
                     </li>
                 {% endfor %}
