@@ -20,20 +20,23 @@
 
         <form method="POST" action="{{ url_for('login') }}" autocomplete="off">
             {{ form.hidden_tag() }}
+            <!-- Dummy fields to discourage browser autofill -->
+            <input type="text" name="fake_username" autocomplete="username" style="position:absolute; left:-9999px; top:-9999px; height:0; width:0; opacity:0;" tabindex="-1">
+            <input type="password" name="fake_password" autocomplete="current-password" style="position:absolute; left:-9999px; top:-9999px; height:0; width:0; opacity:0;" tabindex="-1">
             
             <div class="form-group">
-                {{ form.username.label(class="form-label") }}
-                {{ form.username(class="form-control", autocomplete="off", autocapitalize="none", spellcheck="false", value="") }}
-                {% if form.username.errors %}
-                    <div class="error">{{ form.username.errors[0] }}</div>
+                {{ form.login_username.label(class="form-label") }}
+                {{ form.login_username(class="form-control", id="login_username", autocomplete="off", autocapitalize="none", autocorrect="off", spellcheck="false", value="", readonly=True) }}
+                {% if form.login_username.errors %}
+                    <div class="error">{{ form.login_username.errors[0] }}</div>
                 {% endif %}
             </div>
 
             <div class="form-group">
-                {{ form.password.label(class="form-label") }}
-                {{ form.password(class="form-control", autocomplete="new-password", value="") }}
-                {% if form.password.errors %}
-                    <div class="error">{{ form.password.errors[0] }}</div>
+                {{ form.login_password.label(class="form-label") }}
+                {{ form.login_password(class="form-control", id="login_password", autocomplete="new-password", value="", readonly=True) }}
+                {% if form.login_password.errors %}
+                    <div class="error">{{ form.login_password.errors[0] }}</div>
                 {% endif %}
             </div>
 
@@ -45,4 +48,18 @@
         </div>
     </div>
 </body>
+<script>
+(function() {
+    function clearAndUnlock() {
+        var u = document.getElementById('login_username');
+        var p = document.getElementById('login_password');
+        if (u) { u.value = ''; u.readOnly = false; }
+        if (p) { p.value = ''; p.readOnly = false; }
+    }
+    document.addEventListener('DOMContentLoaded', clearAndUnlock);
+    window.addEventListener('pageshow', function(e) {
+        if (e.persisted) { clearAndUnlock(); }
+    });
+})();
+</script>
 </html>
