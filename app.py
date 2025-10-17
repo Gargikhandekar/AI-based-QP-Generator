@@ -19,7 +19,8 @@ import os
 import openai
 from dotenv import load_dotenv
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 # Try to import Questgen; if unavailable, we'll use a local fallback
 qg = None
@@ -478,6 +479,16 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-change-this-in-production'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+# Session/cookie security settings
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# Set to True in production behind HTTPS
+app.config['SESSION_COOKIE_SECURE'] = False if os.getenv('FLASK_ENV') != 'production' else True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(minutes=30)
+
+# Password reset token serializer
+def get_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(app.config['SECRET_KEY'])
 
 # Initialize extensions
 db = SQLAlchemy(app)
@@ -580,8 +591,9 @@ def seed_questions():
 
 # Forms
 class LoginForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
+    # Use non-standard field names to discourage browser autofill matching
+    login_username = StringField('Username', validators=[DataRequired()])
+    login_password = PasswordField('Password', validators=[DataRequired()])
     submit = SubmitField('Login')
 
 class SignupForm(FlaskForm):
@@ -600,6 +612,15 @@ class QuestionForm(FlaskForm):
     question_type = SelectField('Question Type', choices=[('short_answer', 'Short Answer'), ('mcq', 'Multiple Choice'), ('mixed', 'Mixed')], default='short_answer')
     submit = SubmitField('Get Questions')
 
+class ForgotPasswordForm(FlaskForm):
+    email = StringField('Email', validators=[DataRequired(), Email()])
+    submit = SubmitField('Send reset link')
+
+class ResetPasswordForm(FlaskForm):
+    password = PasswordField('New Password', validators=[DataRequired(), Length(min=6)])
+    confirm_password = PasswordField('Confirm New Password', validators=[DataRequired(), EqualTo('password')])
+    submit = SubmitField('Reset Password')
+
 @app.route('/')
 def home():
     if current_user.is_authenticated:
@@ -613,8 +634,12 @@ def login():
     
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user and check_password_hash(user.password_hash, form.password.data):
+        user = User.query.filter_by(username=form.login_username.data).first()
+        if user and check_password_hash(user.password_hash, form.login_password.data):
+            # Regenerate session and mark as permanent to apply lifetime
+            session.clear()
+            session.permanent = True
+            session['last_activity'] = datetime.utcnow().isoformat()
             login_user(user)
             return redirect(url_for('dashboard'))
         else:
@@ -659,6 +684,56 @@ def logout():
     session.clear()
     flash('You have been logged out', 'info')
     return redirect(url_for('login'))
+
+def generate_reset_token(email: str) -> str:
+    s = get_serializer()
+    return s.dumps({'email': email})
+
+def verify_reset_token(token: str, max_age_seconds: int = 3600) -> str:
+    s = get_serializer()
+    try:
+        data = s.loads(token, max_age=max_age_seconds)
+        return data.get('email', '')
+    except SignatureExpired:
+        return ''
+    except BadSignature:
+        return ''
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    form = ForgotPasswordForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=form.email.data).first()
+        # Always respond generically to avoid user enumeration
+        if user:
+            token = generate_reset_token(user.email)
+            reset_url = url_for('reset_password', token=token, _external=True)
+            print(f"Password reset link for {user.email}: {reset_url}")
+        flash('If the email exists, a reset link has been sent.', 'success')
+        return redirect(url_for('login'))
+    return render_template('forgot_password.html', form=form)
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    if current_user.is_authenticated:
+        return redirect(url_for('dashboard'))
+    email = verify_reset_token(token)
+    if not email:
+        flash('The password reset link is invalid or has expired.', 'error')
+        return redirect(url_for('forgot_password'))
+    form = ResetPasswordForm()
+    if form.validate_on_submit():
+        user = User.query.filter_by(email=email).first()
+        if not user:
+            flash('User not found.', 'error')
+            return redirect(url_for('forgot_password'))
+        user.password_hash = generate_password_hash(form.password.data)
+        db.session.commit()
+        flash('Your password has been reset. Please log in.', 'success')
+        return redirect(url_for('login'))
+    return render_template('reset_password.html', form=form)
 
 @app.route('/dashboard')
 @login_required
@@ -839,6 +914,26 @@ def add_no_cache_headers(response):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+# Idle session timeout enforcement
+@app.before_request
+def enforce_idle_timeout():
+    if not current_user.is_authenticated:
+        return
+    try:
+        last = session.get('last_activity')
+        now = datetime.utcnow()
+        session['last_activity'] = now.isoformat()
+        if last:
+            last_dt = datetime.fromisoformat(last)
+            if now - last_dt > app.config.get('PERMANENT_SESSION_LIFETIME', timedelta(minutes=30)):
+                logout_user()
+                session.clear()
+                flash('Your session expired due to inactivity. Please log in again.', 'info')
+                return redirect(url_for('login'))
+    except Exception:
+        # If parsing fails, reset activity timestamp
+        session['last_activity'] = datetime.utcnow().isoformat()
 
 @app.route('/export_docx', methods=['POST'])
 def export_docx():

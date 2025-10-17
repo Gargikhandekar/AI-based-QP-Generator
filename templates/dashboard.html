@@ -7,22 +7,26 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
+    <div class="container dashboard">
         <div class="header">
-            <h1>Welcome{% if current_user.is_authenticated %}, {{ current_user.username }}{% endif %}!</h1>
+            <div class="brand-inline">
+                <div class="brand-logo small">AQPG</div>
+                <h1>Dashboard</h1>
+            </div>
             <div class="user-actions">
-                <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate Questions</a>
+                <span class="welcome">Hello, {{ current_user.username }}</span>
+                <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">+ Generate</a>
                 <a href="{{ url_for('logout') }}" class="btn btn-secondary">Logout</a>
             </div>
         </div>
 
         <div class="dashboard-content">
-            <h2>Recent Question Sets</h2>
+            <h2>Your Recent Question Papers</h2>
             
             {% if questions %}
-                <div class="question-history">
+                <div class="question-history grid">
                     {% for question_set in questions %}
-                        <div class="question-set">
+                        <div class="question-set card">
                             <div class="question-set-header">
                                 <h3>{{ question_set.subject }}</h3>
                                 <div class="question-set-meta">
@@ -44,9 +48,9 @@
                     {% endfor %}
                 </div>
             {% else %}
-                <div class="no-questions">
-                    <p>You haven't generated any questions yet.</p>
-                    <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate Your First Questions</a>
+                <div class="no-questions card center">
+                    <p class="muted">No question papers yet.</p>
+                    <a href="{{ url_for('generate_questions') }}" class="btn btn-primary">Generate your first paper</a>
                 </div>
             {% endif %}
         </div>
